@@ -20,5 +20,7 @@ under the License.
 pub mod jwt;
 pub mod models;
 
-pub use josekit::jwk::Jwk;
-pub use josekit::jwk::JwkSet;
+pub use josekit::jwe;
+pub use josekit::jwk;
+pub use josekit::jws;
+pub use josekit::jwt as JosekitJwt;
