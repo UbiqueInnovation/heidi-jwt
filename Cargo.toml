@@ -10,6 +10,6 @@ josekit = { git = "https://github.com/ubamrein/josekit-rs.git", default-features
     "rustcrypto",
 ] }
 base64 = "0.22.1"
-# x509-cert = "0.2.5"
+x509-cert = "0.2.5"
 tracing = "0.1.41"
 itertools = "0.14.0"

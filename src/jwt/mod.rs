@@ -32,6 +32,7 @@ use josekit::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::instrument;
+use x509_cert::der::{Decode, Encode};
 
 use crate::models::{
     JwkSet,
@@ -42,7 +43,7 @@ use crate::models::{
 pub mod jwt_rfc7519 {
     use crate::models;
     models!(
-        #[derive(Default)]
+        #[derive(Default, Debug)]
         pub struct TimeValidity {
             #[serde(alias = "nbf")]
             not_before: Option<u64>,
@@ -53,7 +54,7 @@ pub mod jwt_rfc7519 {
         }
     );
     models!(
-        #[derive(Default)]
+        #[derive(Default, Debug)]
         pub struct Header {
             kid: String,
             typ: String,
@@ -61,7 +62,7 @@ pub mod jwt_rfc7519 {
     );
 }
 
-pub trait JwtVerifier<T: Serialize + DeserializeOwned + Debug> {
+pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
     fn verify_header(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
     fn verify_time(&self, jwt: &Jwt<T>) -> Result<(), JwtError> {
         self.verify_time_at(
@@ -98,12 +99,22 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned + Debug> {
 
 pub trait Jwtable: Serialize + DeserializeOwned + Debug {}
 
-#[derive(Clone, Debug)]
-pub struct Jwt<T: Serialize + DeserializeOwned + Debug> {
+#[derive(Clone)]
+pub struct Jwt<T: Serialize + DeserializeOwned> {
     payload: T,
     pub original_payload: String,
     pub signatures: Vec<Signature>,
 }
+impl<T: Serialize + DeserializeOwned> Debug for Jwt<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Jwt")
+            .field("payload", &serde_json::to_string(&self.payload))
+            .field("original_payload", &self.original_payload)
+            .field("signatures", &self.signatures)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Signature {
     pub signature: String,
@@ -111,17 +122,43 @@ pub struct Signature {
     pub header: Option<String>,
 }
 
-impl<T: Serialize + DeserializeOwned + Debug> Jwt<T> {
+impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn header(&self) -> Result<Box<dyn JoseHeader>, JwtError> {
         josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))
     }
-    pub fn payload(&self, jwk_set: &JwkSet) -> Result<&T, JwtError> {
+
+    pub fn payload(
+        &self,
+        jwk_set: &JwkSet,
+        jwt_verifier: &dyn JwtVerifier<T>,
+    ) -> Result<&T, JwtError> {
         self.verify_signature(jwk_set)?;
+        self.verify(jwt_verifier)?;
         Ok(&self.payload)
     }
-    pub fn payload_with_verifier(&self, verifier: &dyn JwsVerifier) -> Result<&T, JwtError> {
-        self.verify_signature_with_verifier(verifier)?;
+    pub fn payload_with_verifier_from_header(
+        &self,
+        jwt_verifier: &dyn JwtVerifier<T>,
+    ) -> Result<&T, JwtError> {
+        let signature_verifier = verifier_for_header(
+            self.header()?
+                .as_any()
+                .downcast_ref::<JwsHeader>()
+                .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?,
+        )
+        .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?;
+        self.verify_signature_with_verifier(signature_verifier.as_ref())?;
+        self.verify(jwt_verifier)?;
+        Ok(&self.payload)
+    }
+    pub fn payload_with_verifier(
+        &self,
+        signature_verifier: &dyn JwsVerifier,
+        jwt_verifier: &dyn JwtVerifier<T>,
+    ) -> Result<&T, JwtError> {
+        self.verify_signature_with_verifier(signature_verifier)?;
+        self.verify(jwt_verifier)?;
         Ok(&self.payload)
     }
     #[instrument(skip(self, jwk_set), err)]
@@ -187,6 +224,7 @@ impl<T: Serialize + DeserializeOwned + Debug> Jwt<T> {
         verifier.verify_body(self)?;
         Ok(())
     }
+
     pub fn payload_unverified(&self) -> Unverified<&T> {
         let p = &self.payload;
         Unverified::new(p)
@@ -215,7 +253,7 @@ impl<'a, T> Unverified<'a, &'a T> {
     }
 }
 
-impl<T: Debug> FromStr for Jwt<T>
+impl<T> FromStr for Jwt<T>
 where
     T: Serialize + DeserializeOwned,
 {
@@ -283,4 +321,82 @@ impl JwkSet {
         }
         None
     }
+}
+#[tracing::instrument]
+//TODO: verify the x509 certificate chain is valid
+pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
+    let alg_name = header.algorithm().unwrap_or("ES256");
+    for alg in [
+        josekit::jws::ES256,
+        josekit::jws::ES384,
+        josekit::jws::ES512,
+    ] {
+        if alg.name() == alg_name {
+            if let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+                let verifier = alg
+                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
+                    .ok()?;
+                return Some(Box::new(verifier));
+            }
+            if let Some(jwk) = header.jwk() {
+                let verifier = alg.verifier_from_jwk(&jwk).ok()?;
+                return Some(Box::new(verifier));
+            }
+        }
+    }
+    for alg in [
+        josekit::jws::RS256,
+        josekit::jws::RS384,
+        josekit::jws::RS512,
+    ] {
+        if alg.name() == alg_name {
+            if let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+                let verifier = alg
+                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
+                    .ok()?;
+                return Some(Box::new(verifier));
+            }
+        }
+        if let Some(jwk) = header.jwk() {
+            let verifier = alg.verifier_from_jwk(&jwk).ok()?;
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [
+        josekit::jws::PS256,
+        josekit::jws::PS384,
+        josekit::jws::PS512,
+    ] {
+        if alg.name() == alg_name {
+            if let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+                let verifier = alg
+                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
+                    .ok()?;
+                return Some(Box::new(verifier));
+            }
+        }
+        if let Some(jwk) = header.jwk() {
+            let verifier = alg.verifier_from_jwk(&jwk).ok()?;
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [josekit::jws::EdDSA] {
+        if alg.name() == alg_name {
+            if let Some(x5c) = header.x509_certificate_chain() {
+                let x509 = x509_cert::Certificate::from_der(&x5c.first()?).ok()?;
+                let verifier = alg
+                    .verifier_from_der(&x509.tbs_certificate.subject_public_key_info.to_der().ok()?)
+                    .ok()?;
+                return Some(Box::new(verifier));
+            }
+        }
+        if let Some(jwk) = header.jwk() {
+            let verifier = alg.verifier_from_jwk(&jwk).ok()?;
+            return Some(Box::new(verifier));
+        }
+    }
+    None
 }
