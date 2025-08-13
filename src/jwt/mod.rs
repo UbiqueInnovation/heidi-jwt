@@ -25,12 +25,17 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use base64::Engine;
+use base64::{
+    Engine,
+    prelude::{BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD},
+};
 use josekit::{
     JoseHeader,
+    jwk::Jwk,
     jws::{JwsHeader, JwsVerifier},
 };
 use serde::{Serialize, de::DeserializeOwned};
+use serde_json::json;
 use tracing::instrument;
 use x509_cert::der::{Decode, Encode};
 
@@ -149,7 +154,11 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
                 .downcast_ref::<JwsHeader>()
                 .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?,
         )
-        .ok_or_else(|| JwtError::Jws(JwsError::InvalidHeader(format!("invalid header"))))?;
+        .ok_or_else(|| {
+            JwtError::Jws(JwsError::InvalidHeader(format!(
+                "cannot extract signature verifier"
+            )))
+        })?;
         self.verify_signature_with_verifier(signature_verifier.as_ref())?;
         self.verify(jwt_verifier)?;
         Ok(&self.payload)
@@ -401,4 +410,29 @@ pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
         }
     }
     None
+}
+
+/// Get a verifier from a SEC1 encoded EC key (no point compression!).
+pub fn ec_verifier_from_sec1(sec1_bytes: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
+    if sec1_bytes.len() != 65 {
+        return None;
+    }
+    let x = &sec1_bytes[1..33];
+    let y = &sec1_bytes[33..65];
+    let x = BASE64_URL_SAFE_NO_PAD.encode(x);
+    let y = BASE64_URL_SAFE_NO_PAD.encode(y);
+    let jwk = json!({
+        "x" : x,
+        "y" : y,
+        "kty" : "EC",
+        "crv" : crv,
+        "use" : "sig"
+    });
+    let jwk: Jwk = serde_json::from_value(jwk).ok()?;
+    return match crv {
+        "P-256" => Some(Box::new(josekit::jws::ES256.verifier_from_jwk(&jwk).ok()?)),
+        "P-384" => Some(Box::new(josekit::jws::ES384.verifier_from_jwk(&jwk).ok()?)),
+        "P-521" => Some(Box::new(josekit::jws::ES512.verifier_from_jwk(&jwk).ok()?)),
+        _ => None,
+    };
 }
