@@ -40,6 +40,8 @@ use crate::models::{
     transformer::Value,
 };
 
+pub mod verifier;
+
 pub mod jwt_rfc7519 {
     use crate::models;
     models!(
