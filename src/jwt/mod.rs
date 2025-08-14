@@ -38,7 +38,7 @@ use x509_cert::der::{Decode, Encode};
 
 use crate::models::{
     JwkSet,
-    errors::{JwsError, JwtError, PayloadError},
+    errors::{JwsError, JwtError, PayloadError, X509Error},
     transformer::Transformer,
 };
 
@@ -424,10 +424,129 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
     None
 }
 
+//TODO: we should check CRL extensions and such
+pub fn check_x5c_chain(chain: &[Vec<u8>]) -> Result<(), JwtError> {
+    if chain.is_empty() {
+        return Err(X509Error::InvalidX5cChain("empty chain".to_string()).into());
+    }
+    let mut last_child: Option<x509_cert::Certificate> = None;
+    for c in chain {
+        let cert = x509_cert::Certificate::from_der(c)
+            .map_err(|e| X509Error::ParseError(format!("{e}")))?;
+        // check validity
+        let validity = cert.tbs_certificate.validity;
+        if validity.not_after.to_system_time() < SystemTime::now() {
+            return Err(X509Error::ExpiredCertificate(format!(
+                "certificate expired at {}",
+                validity.not_after
+            ))
+            .into());
+        }
+        if validity.not_before.to_system_time() > SystemTime::now() {
+            return Err(X509Error::ExpiredCertificate(format!(
+                "certificate not yet valid {}",
+                validity.not_after
+            ))
+            .into());
+        }
+        if let Some(last_child) = last_child {
+            let verifier = verifier_for_x5c(&cert)?;
+            let mut buf = vec![];
+            last_child.tbs_certificate.encode_to_vec(&mut buf).unwrap();
+            println!(
+                "{:?}",
+                verifier.verify(&buf, last_child.signature.raw_bytes())
+            );
+            if verifier
+                .verify(&buf, last_child.signature.raw_bytes())
+                .is_err()
+            {
+                return Err(JwsError::InvalidSignature(format!(
+                    "certificate has invalid signature {}",
+                    last_child.tbs_certificate.subject.to_string()
+                ))
+                .into());
+            };
+        }
+        last_child = Some(cert);
+    }
+    Ok(())
+}
+
+pub fn verifier_for_x5c(x509: &x509_cert::Certificate) -> Result<Box<dyn JwsVerifier>, JwtError> {
+    //TODO: we should check the algorithm identifier in the certificate
+    for alg in [
+        josekit::jws::ES256,
+        josekit::jws::ES384,
+        josekit::jws::ES512,
+    ] {
+        let Ok(verifier) = alg.verifier_from_der(
+            &x509
+                .tbs_certificate
+                .subject_public_key_info
+                .to_der()
+                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
+        ) else {
+            continue;
+        };
+        return Ok(Box::new(verifier));
+    }
+    for alg in [
+        josekit::jws::RS256,
+        josekit::jws::RS384,
+        josekit::jws::RS512,
+    ] {
+        let Ok(verifier) = alg.verifier_from_der(
+            &x509
+                .tbs_certificate
+                .subject_public_key_info
+                .to_der()
+                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
+        ) else {
+            continue;
+        };
+        return Ok(Box::new(verifier));
+    }
+    for alg in [
+        josekit::jws::PS256,
+        josekit::jws::PS384,
+        josekit::jws::PS512,
+    ] {
+        let Ok(verifier) = alg.verifier_from_der(
+            &x509
+                .tbs_certificate
+                .subject_public_key_info
+                .to_der()
+                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
+        ) else {
+            continue;
+        };
+        return Ok(Box::new(verifier));
+    }
+    for alg in [josekit::jws::EdDSA] {
+        let Ok(verifier) = alg.verifier_from_der(
+            &x509
+                .tbs_certificate
+                .subject_public_key_info
+                .to_der()
+                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
+        ) else {
+            continue;
+        };
+        return Ok(Box::new(verifier));
+    }
+    Err(X509Error::InvalidAlgorithm(format!("Invalid Algorithm")).into())
+}
+
 #[tracing::instrument]
 //TODO: verify the x509 certificate chain is valid
 pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
     let alg_name = header.algorithm().unwrap_or("ES256");
+    if let Some(x5c) = header.x509_certificate_chain() {
+        // Check if the x509 certificate chain is valid
+        println!("-#> {:?}", check_x5c_chain(x5c.as_ref()));
+        check_x5c_chain(x5c.as_ref()).ok()?;
+    }
     for alg in [
         josekit::jws::ES256,
         josekit::jws::ES384,

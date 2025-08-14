@@ -31,6 +31,9 @@ error_model!(
     #[derive(Debug, Clone)]
     pub enum X509Error {
         ParseError(String),
+        InvalidX5cChain(String),
+        InvalidAlgorithm(String),
+        ExpiredCertificate(String),
     }
 );
 error_model!(
