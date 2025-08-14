@@ -158,7 +158,9 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))
     }
 
-    pub fn verifier_from_embedded_jwk(&self) -> Result<Vec<Box<dyn JwsVerifier>>, JwtError> {
+    pub fn verifier_from_embedded_jwk(
+        &self,
+    ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
         let insecure = self.payload_unverified();
         let jwt_value: serde_json::Value = serde_json::to_value(insecure.payload).map_err(|e| {
             JwtError::Payload(PayloadError::MissingRequiredProperty(format!(
@@ -179,10 +181,11 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
             let Ok(jwk) = serde_json::from_value::<Jwk>(key.clone()) else {
                 continue;
             };
+            let key_id = jwk.key_id().unwrap_or_default().to_string();
             let Some(verifier) = verifier_for_jwk(jwk) else {
                 continue;
             };
-            verifiers.push(verifier);
+            verifiers.push((key_id, verifier));
         }
         Ok(verifiers)
     }
