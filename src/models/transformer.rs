@@ -15,12 +15,15 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
  */
 use std::{collections::HashMap, ops::Deref};
 
 use itertools::Itertools;
+use josekit::jwk::Jwk;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+use crate::models::errors::{JwtError, PayloadError};
 
 pub trait Transformer {
     fn set_field(&mut self, name: &str, value: Value);
@@ -184,36 +187,50 @@ impl Value {
 }
 impl From<Value> for serde_json::Value {
     fn from(value: Value) -> Self {
+        (&value).into()
+    }
+}
+impl From<&Value> for serde_json::Value {
+    fn from(value: &Value) -> Self {
         match value {
             Value::Null => serde_json::Value::Null,
-            Value::Boolean(b) => serde_json::Value::Bool(b),
-            Value::Integer(i) => serde_json::Value::Number(serde_json::Number::from(i)),
+            Value::Boolean(b) => serde_json::Value::Bool(*b),
+            Value::Integer(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
             Value::Float(f) => {
                 serde_json::Value::Number(serde_json::Number::from_f64(f.into()).unwrap())
             }
-            Value::String(s) => serde_json::Value::String(s),
+            Value::String(s) => serde_json::Value::String(s.clone()),
             Value::Array(a) => serde_json::Value::Array(a.into_iter().map(|v| v.into()).collect()),
-            Value::Object(o) => {
-                serde_json::Value::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
-            }
+            Value::Object(o) => serde_json::Value::Object(
+                o.into_iter().map(|(k, v)| (k.clone(), v.into())).collect(),
+            ),
         }
     }
 }
+
 impl From<Value> for Option<serde_json::Value> {
     fn from(value: Value) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&Value> for Option<serde_json::Value> {
+    fn from(value: &Value) -> Self {
         match value {
             Value::Null => None,
-            Value::Boolean(b) => Some(serde_json::Value::Bool(b)),
-            Value::Integer(i) => Some(serde_json::Value::Number(serde_json::Number::from(i))),
+            Value::Boolean(b) => Some(serde_json::Value::Bool(*b)),
+            Value::Integer(i) => Some(serde_json::Value::Number(serde_json::Number::from(*i))),
             Value::Float(f) => Some(serde_json::Value::Number(
                 serde_json::Number::from_f64(f.into()).unwrap(),
             )),
-            Value::String(s) => Some(serde_json::Value::String(s)),
+            Value::String(s) => Some(serde_json::Value::String(s.clone())),
             Value::Array(a) => Some(serde_json::Value::Array(
-                a.into_iter().map(|v| v.into()).collect(),
+                a.into_iter().map(|v| v.clone().into()).collect(),
             )),
             Value::Object(o) => Some(serde_json::Value::Object(
-                o.into_iter().map(|(k, v)| (k, v.into())).collect(),
+                o.into_iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::from(v.clone())))
+                    .collect(),
             )),
         }
     }
@@ -244,6 +261,26 @@ impl From<serde_json::Value> for Value {
     }
 }
 
+impl TryFrom<Value> for Jwk {
+    type Error = JwtError;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        (&value).try_into()
+    }
+}
+impl TryFrom<&Value> for Jwk {
+    type Error = JwtError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let v: serde_json::Value = value.into();
+        let jwk: Jwk = serde_json::from_value(v).map_err(|e| {
+            JwtError::Payload(PayloadError::MissingRequiredProperty(format!(
+                "Cannot convert to Jwk:{e}"
+            )))
+        })?;
+        Ok(jwk)
+    }
+}
 impl Transformer for Value {
     fn set_field(&mut self, name: &str, value: Value) {
         if let Value::Object(map) = self {

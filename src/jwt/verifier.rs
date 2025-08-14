@@ -1,11 +1,10 @@
-use josekit::jws::JwsHeader;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     jwt::JwtVerifier,
     models::{
         self,
-        errors::{JwsError, JwtError, PayloadError},
+        errors::{JwtError, PayloadError},
     },
 };
 
@@ -29,24 +28,7 @@ impl DefaultVerifier {
 
 impl<T: Serialize + DeserializeOwned> JwtVerifier<T> for DefaultVerifier {
     fn verify_header(&self, jwt: &super::Jwt<T>) -> Result<(), crate::models::errors::JwtError> {
-        let header = jwt.header()?;
-        let Some(jws_header) = header.as_any().downcast_ref::<JwsHeader>() else {
-            return Err(JwtError::Jws(JwsError::TypeError(
-                "Invalid header type".to_string(),
-            )));
-        };
-
-        let Some(typ) = jws_header.token_type() else {
-            return Err(JwtError::Jws(JwsError::TypeError(
-                "typ missing".to_string(),
-            )));
-        };
-        if typ != self.jwt_type.as_str() {
-            return Err(JwtError::Jws(JwsError::TypeError(
-                "Invalid header type".to_string(),
-            )));
-        }
-        Ok(())
+        self.assert_type(jwt, &self.jwt_type)
     }
 
     fn verify_body(&self, jwt: &super::Jwt<T>) -> Result<(), crate::models::errors::JwtError> {

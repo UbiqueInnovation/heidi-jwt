@@ -25,10 +25,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use base64::{
-    Engine,
-    prelude::{BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD},
-};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use josekit::{
     JoseHeader,
     jwk::Jwk,
@@ -70,6 +67,32 @@ pub mod jwt_rfc7519 {
 }
 
 pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
+    fn jws_header(&self, jwt: &Jwt<T>) -> Result<JwsHeader, JwtError> {
+        let header = jwt.header()?;
+        let Some(jws_header) = header.as_any().downcast_ref::<JwsHeader>() else {
+            return Err(JwtError::Jws(JwsError::TypeError(
+                "Invalid header type".to_string(),
+            )));
+        };
+        Ok(jws_header.clone())
+    }
+    fn typ(&self, jwt: &Jwt<T>) -> Option<String> {
+        let jws_header = self.jws_header(jwt).ok()?;
+        jws_header.token_type().map(|s| s.to_string())
+    }
+    fn assert_type(&self, jwt: &Jwt<T>, expected_type: &str) -> Result<(), JwtError> {
+        let ty = self.typ(jwt).ok_or(JwtError::Jws(JwsError::TypeError(
+            "Invalid header type".to_string(),
+        )))?;
+        if ty != expected_type {
+            Err(JwtError::Jws(JwsError::TypeError(format!(
+                "Expected type {}, got {}",
+                expected_type, ty
+            ))))
+        } else {
+            Ok(())
+        }
+    }
     fn verify_header(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
     fn verify_time(&self, jwt: &Jwt<T>) -> Result<(), JwtError> {
         self.verify_time_at(
