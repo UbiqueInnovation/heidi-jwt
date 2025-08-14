@@ -105,7 +105,7 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
     }
     #[instrument(skip(self, jwt), fields(time_parts))]
     fn verify_time_at(&self, jwt: &Jwt<T>, time: u64) -> Result<(), JwtError> {
-        let val: Value = serde_json::to_value(jwt.payload_unverified().insecure())
+        let val: Value = serde_json::to_value(jwt.generalized_payload_unverified().insecure())
             .unwrap()
             .into();
         let mut time_parts = jwt_rfc7519::TimeValidity::default();
@@ -132,6 +132,7 @@ pub trait Jwtable: Serialize + DeserializeOwned + Debug {}
 #[derive(Clone)]
 pub struct Jwt<T: Serialize + DeserializeOwned> {
     payload: T,
+    generalized_payload: Value,
     pub original_payload: String,
     pub signatures: Vec<Signature>,
 }
@@ -161,12 +162,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn verifier_from_embedded_jwk(
         &self,
     ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
-        let insecure = self.payload_unverified();
-        let jwt_value: serde_json::Value = serde_json::to_value(insecure.payload).map_err(|e| {
-            JwtError::Payload(PayloadError::MissingRequiredProperty(format!(
-                "Cannot convert to value {e}",
-            )))
-        })?;
+        let jwt_value: serde_json::Value = (&self.generalized_payload).into();
         let Some(jwks) = jwt_value
             .get("jwks")
             .and_then(|a| a.get("keys"))
@@ -291,6 +287,9 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
         Ok(())
     }
 
+    pub fn generalized_payload_unverified(&self) -> Unverified<&Value> {
+        Unverified::new(&self.generalized_payload)
+    }
     pub fn payload_unverified(&self) -> Unverified<&T> {
         let p = &self.payload;
         Unverified::new(p)
@@ -335,8 +334,11 @@ where
             .decode(payload)
             .unwrap();
         let payload = std::str::from_utf8(&payload).unwrap();
+
         Ok(Self {
             payload: serde_json::from_str(payload)
+                .map_err(|e| JwsError::BodyParseError(format!("{e}")))?,
+            generalized_payload: serde_json::from_str(payload)
                 .map_err(|e| JwsError::BodyParseError(format!("{e}")))?,
             original_payload,
             signatures: vec![Signature {
