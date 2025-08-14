@@ -38,7 +38,7 @@ use x509_cert::der::{Decode, Encode};
 
 use crate::models::{
     JwkSet,
-    errors::{JwsError, JwtError},
+    errors::{JwsError, JwtError, PayloadError},
     transformer::Value,
 };
 
@@ -156,6 +156,35 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn header(&self) -> Result<Box<dyn JoseHeader>, JwtError> {
         josekit::jwt::decode_header(self.jwt_at(0))
             .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))
+    }
+
+    pub fn verifier_from_embedded_jwk(&self) -> Result<Vec<Box<dyn JwsVerifier>>, JwtError> {
+        let insecure = self.payload_unverified();
+        let jwt_value: serde_json::Value = serde_json::to_value(insecure.payload).map_err(|e| {
+            JwtError::Payload(PayloadError::MissingRequiredProperty(format!(
+                "Cannot convert to value {e}",
+            )))
+        })?;
+        let Some(jwks) = jwt_value
+            .get("jwks")
+            .and_then(|a| a.get("keys"))
+            .and_then(|a| a.as_array())
+        else {
+            return Err(JwtError::Payload(PayloadError::MissingRequiredProperty(
+                "jwks".to_string(),
+            )));
+        };
+        let mut verifiers = vec![];
+        for key in jwks {
+            let Ok(jwk) = serde_json::from_value::<Jwk>(key.clone()) else {
+                continue;
+            };
+            let Some(verifier) = verifier_for_jwk(jwk) else {
+                continue;
+            };
+            verifiers.push(verifier);
+        }
+        Ok(verifiers)
     }
 
     pub fn payload(
@@ -356,6 +385,43 @@ impl JwkSet {
         None
     }
 }
+
+pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
+    for alg in [
+        josekit::jws::ES256,
+        josekit::jws::ES384,
+        josekit::jws::ES512,
+    ] {
+        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [
+        josekit::jws::RS256,
+        josekit::jws::RS384,
+        josekit::jws::RS512,
+    ] {
+        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [
+        josekit::jws::PS256,
+        josekit::jws::PS384,
+        josekit::jws::PS512,
+    ] {
+        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+            return Some(Box::new(verifier));
+        }
+    }
+    for alg in [josekit::jws::EdDSA] {
+        if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
+            return Some(Box::new(verifier));
+        }
+    }
+    None
+}
+
 #[tracing::instrument]
 //TODO: verify the x509 certificate chain is valid
 pub fn verifier_for_header(header: &JwsHeader) -> Option<Box<dyn JwsVerifier>> {
