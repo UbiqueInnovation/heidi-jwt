@@ -15,7 +15,7 @@ software distributed under the License is distributed on an
 "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
-under the License.   
+under the License.
  */
 pub mod errors;
 pub mod transformer;
@@ -69,11 +69,12 @@ macro_rules! extension {
 
 #[macro_export]
 macro_rules! models {
-    ($(#[$($meta:tt)*])* $vis:vis struct $name:ident { $( $(#[$($meta_field:tt)*])* $field:ident : $type:ty),*, }) => {
+    ($(#[$($meta:tt)*])* $vis:vis struct $name:ident { $( $(#[$($meta_field:tt)*])* $field:ident $(($alias:expr))? : $type:ty),*, }) => {
         #[derive(serde::Deserialize, serde::Serialize)]
         $(#[$($meta)*])*
         $vis struct $name {
-            $($(#[$($meta_field)*])* pub $field: $type),*,
+            $($(#[$($meta_field)*])* $(#[serde(alias = $alias)])? pub $field: $type),*,
+
             #[serde(flatten)]
             pub additional_fields: serde_json::Map<String, serde_json::Value>,
         }
@@ -94,6 +95,7 @@ macro_rules! models {
             pub fn to_transformer(&self, transformer: &mut dyn $crate::models::transformer::Transformer) {
                 $(
                     let v = serde_json::to_value(&self.$field).unwrap_or(serde_json::Value ::Null);
+                     $(transformer.set_field($alias, v.clone().into());)?
                     transformer.set_field(stringify!($field), v.into());
                 )*
                 for (key, value) in &self.additional_fields {
@@ -107,12 +109,20 @@ macro_rules! models {
                     $(stringify!($field) => {
                         self.$field = serde_json::from_value(value.into()).unwrap();
                     } )*
+                    $($(
+                        $alias => {
+                            self.$field = serde_json::from_value(value.into()).unwrap();
+                        }
+                    )?)*
                     _ =>  { self.additional_fields.insert(name.to_string(), value.into()); }
                 }
             }
             fn transform(self, transformer: &mut dyn $crate::models::transformer::Transformer) -> Result<(), String> {
                 self.to_transformer(transformer);
                 Ok(())
+            }
+            fn write_to_transformer(&self, transformer: &mut dyn $crate::models::transformer::Transformer) {
+                self.to_transformer(transformer);
             }
         }
     };

@@ -28,6 +28,7 @@ use crate::models::errors::{JwtError, PayloadError};
 pub trait Transformer {
     fn set_field(&mut self, name: &str, value: Value);
     fn transform(self, transformer: &mut dyn Transformer) -> Result<(), String>;
+    fn write_to_transformer(&self, transformer: &mut dyn Transformer);
 }
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Clone, Debug, Copy)]
@@ -296,5 +297,38 @@ impl Transformer for Value {
             return Ok(());
         }
         Err("Only available for objects".to_string())
+    }
+
+    fn write_to_transformer(&self, transformer: &mut dyn Transformer) {
+        if let Some(object) = self.as_object() {
+            for (key, value) in object {
+                transformer.set_field(key, value.clone());
+            }
+        }
+    }
+}
+
+impl Transformer for serde_json::Value {
+    fn set_field(&mut self, name: &str, value: Value) {
+        if let serde_json::Value::Object(map) = self {
+            map.insert(name.to_string(), value.into());
+        }
+    }
+
+    fn transform(self, transformer: &mut dyn Transformer) -> Result<(), String> {
+        if let serde_json::Value::Object(map) = self {
+            for (key, value) in map {
+                transformer.set_field(&key, value.into());
+            }
+            return Ok(());
+        }
+        Err("Only available for objects".to_string())
+    }
+    fn write_to_transformer(&self, transformer: &mut dyn Transformer) {
+        if let Some(object) = self.as_object() {
+            for (key, value) in object {
+                transformer.set_field(key, value.clone().into());
+            }
+        }
     }
 }

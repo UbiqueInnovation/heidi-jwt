@@ -39,7 +39,6 @@ use x509_cert::der::{Decode, Encode};
 use crate::models::{
     JwkSet,
     errors::{JwsError, JwtError, PayloadError},
-    transformer::Value,
 };
 
 pub mod verifier;
@@ -49,12 +48,9 @@ pub mod jwt_rfc7519 {
     models!(
         #[derive(Default, Debug)]
         pub struct TimeValidity {
-            #[serde(alias = "nbf")]
-            not_before: Option<u64>,
-            #[serde(alias = "exp")]
-            expires_at: Option<u64>,
-            #[serde(alias = "iat")]
-            issued_at: Option<u64>,
+            not_before ("nbf"): Option<u64>,
+            expires_at ("exp"): Option<u64>,
+            issued_at ("iat"): Option<u64>,
         }
     );
     models!(
@@ -105,11 +101,12 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
     }
     #[instrument(skip(self, jwt), fields(time_parts))]
     fn verify_time_at(&self, jwt: &Jwt<T>, time: u64) -> Result<(), JwtError> {
-        let val: Value = serde_json::to_value(jwt.generalized_payload_unverified().insecure())
-            .unwrap()
-            .into();
-        let mut time_parts = jwt_rfc7519::TimeValidity::default();
-        val.write_to_transformer(&mut time_parts);
+        let time_parts: jwt_rfc7519::TimeValidity =
+            serde_json::from_value(jwt.generalized_payload_unverified().insecure().clone())
+                .map_err(|e| {
+                    JwtError::Payload(PayloadError::MissingRequiredProperty(format!("{e}")))
+                })?;
+
         if let Some(nbf) = time_parts.not_before {
             if nbf > time {
                 return Err(JwtError::Jws(JwsError::NotYetValid(
@@ -132,7 +129,7 @@ pub trait Jwtable: Serialize + DeserializeOwned + Debug {}
 #[derive(Clone)]
 pub struct Jwt<T: Serialize + DeserializeOwned> {
     payload: T,
-    generalized_payload: Value,
+    generalized_payload: serde_json::Value,
     pub original_payload: String,
     pub signatures: Vec<Signature>,
 }
@@ -162,8 +159,8 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
     pub fn verifier_from_embedded_jwk(
         &self,
     ) -> Result<Vec<(String, Box<dyn JwsVerifier>)>, JwtError> {
-        let jwt_value: serde_json::Value = (&self.generalized_payload).into();
-        let Some(jwks) = jwt_value
+        let Some(jwks) = self
+            .generalized_payload
             .get("jwks")
             .and_then(|a| a.get("keys"))
             .and_then(|a| a.as_array())
@@ -287,7 +284,7 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
         Ok(())
     }
 
-    pub fn generalized_payload_unverified(&self) -> Unverified<&Value> {
+    pub fn generalized_payload_unverified(&self) -> Unverified<&serde_json::Value> {
         Unverified::new(&self.generalized_payload)
     }
     pub fn payload_unverified(&self) -> Unverified<&T> {
