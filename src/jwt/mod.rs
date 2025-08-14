@@ -39,6 +39,7 @@ use x509_cert::der::{Decode, Encode};
 use crate::models::{
     JwkSet,
     errors::{JwsError, JwtError, PayloadError},
+    transformer::Transformer,
 };
 
 pub mod verifier;
@@ -101,11 +102,10 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
     }
     #[instrument(skip(self, jwt), fields(time_parts))]
     fn verify_time_at(&self, jwt: &Jwt<T>, time: u64) -> Result<(), JwtError> {
-        let time_parts: jwt_rfc7519::TimeValidity =
-            serde_json::from_value(jwt.generalized_payload_unverified().insecure().clone())
-                .map_err(|e| {
-                    JwtError::Payload(PayloadError::MissingRequiredProperty(format!("{e}")))
-                })?;
+        let mut time_parts = jwt_rfc7519::TimeValidity::default();
+        jwt.generalized_payload_unverified()
+            .insecure()
+            .write_to_transformer(&mut time_parts);
 
         if let Some(nbf) = time_parts.not_before {
             if nbf > time {
