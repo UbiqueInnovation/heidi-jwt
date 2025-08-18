@@ -654,3 +654,51 @@ pub fn ec_verifier_from_sec1(sec1_bytes: &[u8], crv: &str) -> Option<Box<dyn Jws
         _ => None,
     };
 }
+
+/// Get a verifier from an encoded HMAC key.
+pub fn hmac_verifier_from_bytes(bytes: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
+    return match alg {
+        "HS256" => Some(Box::new(
+            josekit::jws::HS256.verifier_from_bytes(&bytes).ok()?,
+        )),
+        "HS384" => Some(Box::new(
+            josekit::jws::HS384.verifier_from_bytes(&bytes).ok()?,
+        )),
+        "HS512" => Some(Box::new(
+            josekit::jws::HS512.verifier_from_bytes(&bytes).ok()?,
+        )),
+        _ => None,
+    };
+}
+
+/// Get a verifier from an encoded RSA key.
+pub fn rsa_verifier_from_der(der: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
+    match crv {
+        "RS256" => Some(Box::new(josekit::jws::RS256.verifier_from_der(&der).ok()?)),
+        "RS384" => Some(Box::new(josekit::jws::RS384.verifier_from_der(&der).ok()?)),
+        "RS512" => Some(Box::new(josekit::jws::RS512.verifier_from_der(&der).ok()?)),
+        "PS256" => Some(Box::new(josekit::jws::PS256.verifier_from_der(&der).ok()?)),
+        "PS384" => Some(Box::new(josekit::jws::PS384.verifier_from_der(&der).ok()?)),
+        "PS512" => Some(Box::new(josekit::jws::PS512.verifier_from_der(&der).ok()?)),
+        _ => None,
+    }
+}
+
+// Get a verifier from an encoded EdDSA key.
+pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
+    if bytes.len() != 32 {
+        return None;
+    }
+    let x = BASE64_URL_SAFE_NO_PAD.encode(bytes);
+    let jwk = json!({
+        "x" : x,
+        "kty" : "OKP",
+        "crv" : crv,
+        "use" : "sig"
+    });
+    let jwk: Jwk = serde_json::from_value(jwk).ok()?;
+    return match crv {
+        "Ed25519" => Some(Box::new(josekit::jws::EdDSA.verifier_from_jwk(&jwk).ok()?)),
+        _ => None,
+    };
+}
