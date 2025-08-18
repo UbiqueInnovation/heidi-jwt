@@ -151,9 +151,17 @@ pub struct Signature {
 }
 
 impl<T: Serialize + DeserializeOwned> Jwt<T> {
-    pub fn header(&self) -> Result<Box<dyn JoseHeader>, JwtError> {
+    pub fn header(&self) -> Result<JwsHeader, JwtError> {
         josekit::jwt::decode_header(self.jwt_at(0))
-            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))
+            .map(|h| {
+                h.as_any()
+                    .downcast_ref::<JwsHeader>()
+                    .cloned()
+                    .ok_or_else(|| {
+                        JwtError::Jws(JwsError::InvalidHeader("Invalid header type".to_string()))
+                    })
+            })
+            .map_err(|e| JwtError::Jws(JwsError::InvalidHeader(format!("{e}"))))?
     }
 
     pub fn verifier_from_embedded_jwk(
