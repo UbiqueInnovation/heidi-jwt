@@ -684,7 +684,7 @@ pub fn rsa_verifier_from_der(der: &[u8], alg: &str) -> Option<Box<dyn JwsVerifie
     }
 }
 
-// Get a verifier from an encoded EdDSA key.
+/// Get a verifier from an encoded EdDSA key.
 pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
     if bytes.len() != 32 {
         return None;
