@@ -55,6 +55,7 @@ error_model!(
     #[derive(Debug, Clone)]
     pub enum PayloadError {
         MissingRequiredProperty(String),
+        InvalidPayload(String),
     }
 );
 
