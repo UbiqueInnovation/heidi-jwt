@@ -42,6 +42,7 @@ use crate::models::{
     transformer::Transformer,
 };
 
+pub mod creator;
 pub mod verifier;
 
 pub mod jwt_rfc7519 {
