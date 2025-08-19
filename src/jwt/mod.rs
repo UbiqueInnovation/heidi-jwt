@@ -672,8 +672,8 @@ pub fn hmac_verifier_from_bytes(bytes: &[u8], alg: &str) -> Option<Box<dyn JwsVe
 }
 
 /// Get a verifier from an encoded RSA key.
-pub fn rsa_verifier_from_der(der: &[u8], crv: &str) -> Option<Box<dyn JwsVerifier>> {
-    match crv {
+pub fn rsa_verifier_from_der(der: &[u8], alg: &str) -> Option<Box<dyn JwsVerifier>> {
+    match alg {
         "RS256" => Some(Box::new(josekit::jws::RS256.verifier_from_der(&der).ok()?)),
         "RS384" => Some(Box::new(josekit::jws::RS384.verifier_from_der(&der).ok()?)),
         "RS512" => Some(Box::new(josekit::jws::RS512.verifier_from_der(&der).ok()?)),
@@ -698,7 +698,7 @@ pub fn eddsa_verifier_from_bytes(bytes: &[u8], crv: &str) -> Option<Box<dyn JwsV
     });
     let jwk: Jwk = serde_json::from_value(jwk).ok()?;
     return match crv {
-        "Ed25519" => Some(Box::new(josekit::jws::EdDSA.verifier_from_jwk(&jwk).ok()?)),
+        "Ed25519" | "Ed448" => Some(Box::new(josekit::jws::EdDSA.verifier_from_jwk(&jwk).ok()?)),
         _ => None,
     };
 }
