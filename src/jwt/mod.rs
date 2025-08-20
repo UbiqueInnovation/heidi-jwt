@@ -18,12 +18,7 @@ specific language governing permissions and limitations
 under the License.
  */
 
-use std::{
-    fmt::Debug,
-    marker::PhantomData,
-    str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fmt::Debug, marker::PhantomData, str::FromStr, time::SystemTime};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::Utc;
@@ -35,7 +30,7 @@ use josekit::{
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tracing::instrument;
-use x509_cert::der::{DateTime, Decode, Encode};
+use x509_cert::der::{Decode, Encode};
 
 use crate::models::{
     JwkSet,
@@ -479,19 +474,22 @@ pub fn check_x5c_chain(chain: &[Vec<u8>]) -> Result<(), JwtError> {
 }
 
 pub fn verifier_for_x5c(x509: &x509_cert::Certificate) -> Result<Box<dyn JwsVerifier>, JwtError> {
+    verifier_for_der(
+        &x509
+            .tbs_certificate
+            .subject_public_key_info
+            .to_der()
+            .map_err(|e| X509Error::ParseError(format!("{e}")))?,
+    )
+}
+pub fn verifier_for_der(der: &[u8]) -> Result<Box<dyn JwsVerifier>, JwtError> {
     //TODO: we should check the algorithm identifier in the certificate
     for alg in [
         josekit::jws::ES256,
         josekit::jws::ES384,
         josekit::jws::ES512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(
-            &x509
-                .tbs_certificate
-                .subject_public_key_info
-                .to_der()
-                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
-        ) else {
+        let Ok(verifier) = alg.verifier_from_der(der) else {
             continue;
         };
         return Ok(Box::new(verifier));
@@ -501,13 +499,7 @@ pub fn verifier_for_x5c(x509: &x509_cert::Certificate) -> Result<Box<dyn JwsVeri
         josekit::jws::RS384,
         josekit::jws::RS512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(
-            &x509
-                .tbs_certificate
-                .subject_public_key_info
-                .to_der()
-                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
-        ) else {
+        let Ok(verifier) = alg.verifier_from_der(der) else {
             continue;
         };
         return Ok(Box::new(verifier));
@@ -517,25 +509,13 @@ pub fn verifier_for_x5c(x509: &x509_cert::Certificate) -> Result<Box<dyn JwsVeri
         josekit::jws::PS384,
         josekit::jws::PS512,
     ] {
-        let Ok(verifier) = alg.verifier_from_der(
-            &x509
-                .tbs_certificate
-                .subject_public_key_info
-                .to_der()
-                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
-        ) else {
+        let Ok(verifier) = alg.verifier_from_der(der) else {
             continue;
         };
         return Ok(Box::new(verifier));
     }
     for alg in [josekit::jws::EdDSA] {
-        let Ok(verifier) = alg.verifier_from_der(
-            &x509
-                .tbs_certificate
-                .subject_public_key_info
-                .to_der()
-                .map_err(|e| X509Error::ParseError(format!("{e}")))?,
-        ) else {
+        let Ok(verifier) = alg.verifier_from_der(der) else {
             continue;
         };
         return Ok(Box::new(verifier));
