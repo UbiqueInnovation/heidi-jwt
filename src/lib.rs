@@ -20,6 +20,7 @@ under the License.
 pub mod jwt;
 pub mod models;
 
+pub use chrono;
 pub use josekit::JoseError;
 pub use josekit::jwe;
 pub use josekit::jwk::{Jwk, JwkSet};

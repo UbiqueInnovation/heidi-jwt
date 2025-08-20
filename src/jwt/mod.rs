@@ -26,6 +26,7 @@ use std::{
 };
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use chrono::Utc;
 use josekit::{
     JoseHeader,
     jwk::Jwk,
@@ -34,7 +35,7 @@ use josekit::{
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use tracing::instrument;
-use x509_cert::der::{Decode, Encode};
+use x509_cert::der::{DateTime, Decode, Encode};
 
 use crate::models::{
     JwkSet,
@@ -50,9 +51,9 @@ pub mod jwt_rfc7519 {
     models!(
         #[derive(Default, Debug)]
         pub struct TimeValidity {
-            not_before ("nbf"): Option<u64>,
-            expires_at ("exp"): Option<u64>,
-            issued_at ("iat"): Option<u64>,
+            not_before ("nbf"): Option<i64>,
+            expires_at ("exp"): Option<i64>,
+            issued_at ("iat"): Option<i64>,
         }
     );
     models!(
@@ -93,16 +94,11 @@ pub trait JwtVerifier<T: Serialize + DeserializeOwned> {
     }
     fn verify_header(&self, jwt: &Jwt<T>) -> Result<(), JwtError>;
     fn verify_time(&self, jwt: &Jwt<T>) -> Result<(), JwtError> {
-        self.verify_time_at(
-            jwt,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        )
+        self.verify_time_at(jwt, Utc::now())
     }
     #[instrument(skip(self, jwt), fields(time_parts))]
-    fn verify_time_at(&self, jwt: &Jwt<T>, time: u64) -> Result<(), JwtError> {
+    fn verify_time_at(&self, jwt: &Jwt<T>, time: chrono::DateTime<Utc>) -> Result<(), JwtError> {
+        let time = time.timestamp();
         let mut time_parts = jwt_rfc7519::TimeValidity::default();
         jwt.generalized_payload_unverified()
             .insecure()
