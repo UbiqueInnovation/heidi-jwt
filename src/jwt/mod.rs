@@ -25,7 +25,7 @@ use chrono::Utc;
 use josekit::{
     JoseHeader,
     jwk::Jwk,
-    jws::{JwsHeader, JwsVerifier},
+    jws::{JwsHeader, JwsSigner, JwsVerifier},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
@@ -419,6 +419,41 @@ pub fn verifier_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsVerifier>> {
     for alg in [josekit::jws::EdDSA] {
         if let Ok(verifier) = alg.verifier_from_jwk(&jwk) {
             return Some(Box::new(verifier));
+        }
+    }
+    None
+}
+pub fn signer_for_jwk(jwk: Jwk) -> Option<Box<dyn JwsSigner>> {
+    for alg in [
+        josekit::jws::ES256,
+        josekit::jws::ES384,
+        josekit::jws::ES512,
+    ] {
+        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+            return Some(Box::new(signer));
+        }
+    }
+    for alg in [
+        josekit::jws::RS256,
+        josekit::jws::RS384,
+        josekit::jws::RS512,
+    ] {
+        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+            return Some(Box::new(signer));
+        }
+    }
+    for alg in [
+        josekit::jws::PS256,
+        josekit::jws::PS384,
+        josekit::jws::PS512,
+    ] {
+        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+            return Some(Box::new(signer));
+        }
+    }
+    for alg in [josekit::jws::EdDSA] {
+        if let Ok(signer) = alg.signer_from_jwk(&jwk) {
+            return Some(Box::new(signer));
         }
     }
     None
