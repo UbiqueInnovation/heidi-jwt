@@ -220,6 +220,15 @@ impl<T: Serialize + DeserializeOwned> Jwt<T> {
         self.verify(jwt_verifier)?;
         Ok(&self.payload)
     }
+    pub fn payload_with_verifier_from_keyset(
+        &self,
+        key_set: &JwkSet,
+        jwt_verifier: &dyn JwtVerifier<T>,
+    ) -> Result<&T, JwtError> {
+        self.verify_signature(key_set)?;
+        self.verify(jwt_verifier)?;
+        Ok(&self.payload)
+    }
     #[instrument(skip(self, jwk_set), err)]
     pub fn verify_signature(&self, jwk_set: &JwkSet) -> Result<(), JwtError> {
         let header = josekit::jwt::decode_header(self.jwt_at(0))
