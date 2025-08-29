@@ -15,8 +15,22 @@ pub trait JwtCreator: Serialize + DeserializeOwned {
         header: &Self::Header,
         issuer: Option<&str>,
         lifetime: chrono::Duration,
-        signer: &dyn JwsSigner,
+        signer: &dyn Signer,
     ) -> Result<String, JwtError>;
+}
+
+pub trait Signer {
+    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, JwtError>;
+}
+
+impl<T> Signer for T
+where
+    T: JwsSigner,
+{
+    fn sign(&self, data: &[u8]) -> Result<Vec<u8>, JwtError> {
+        self.sign(data)
+            .map_err(|e| JwtError::Jws(JwsError::InvalidSignature(format!("Signing-Error: {e}"))))
+    }
 }
 
 impl<T> JwtCreator for T
@@ -30,7 +44,7 @@ where
         header: &Self::Header,
         issuer: Option<&str>,
         lifetime: chrono::Duration,
-        signer: &dyn JwsSigner,
+        signer: &dyn Signer,
     ) -> Result<String, JwtError> {
         let mut val = serde_json::to_value(self).map_err(|e| {
             JwtError::Payload(PayloadError::InvalidPayload(format!("Serde-Error: {e}")))
@@ -48,10 +62,7 @@ where
         })?);
         let header = BASE64_URL_SAFE_NO_PAD.encode(header.to_string());
         let mut jwt = format!("{}.{}", header, payload);
-        let signature =
-            BASE64_URL_SAFE_NO_PAD.encode(signer.sign(jwt.as_bytes()).map_err(|e| {
-                JwtError::Jws(JwsError::InvalidSignature(format!("Signing-Error: {e}")))
-            })?);
+        let signature = BASE64_URL_SAFE_NO_PAD.encode(signer.sign(jwt.as_bytes())?);
         jwt.push_str(".");
         jwt.push_str(&signature);
         Ok(jwt)
