@@ -13,7 +13,7 @@ pub trait JwtCreator: Serialize + DeserializeOwned {
     fn create_jwt(
         &self,
         header: &Self::Header,
-        issuer: &str,
+        issuer: Option<&str>,
         lifetime: chrono::Duration,
         signer: &dyn JwsSigner,
     ) -> Result<String, JwtError>;
@@ -28,7 +28,7 @@ where
     fn create_jwt(
         &self,
         header: &Self::Header,
-        issuer: &str,
+        issuer: Option<&str>,
         lifetime: chrono::Duration,
         signer: &dyn JwsSigner,
     ) -> Result<String, JwtError> {
@@ -36,7 +36,9 @@ where
             JwtError::Payload(PayloadError::InvalidPayload(format!("Serde-Error: {e}")))
         })?;
         let now = Utc::now();
-        val["iss"] = serde_json::Value::String(issuer.to_string());
+        if let Some(issuer) = issuer {
+            val["iss"] = serde_json::Value::String(issuer.to_string());
+        }
         val["iat"] = serde_json::Value::Number(now.timestamp().into());
         // account for clock skew
         val["nbf"] = serde_json::Value::Number((now - Duration::minutes(5)).timestamp().into());
@@ -91,7 +93,7 @@ mod tests {
             id: "1".to_string(),
             name: "John".to_string(),
         }
-        .create_jwt(&header, "test-issuer", Duration::minutes(5), &signer)
+        .create_jwt(&header, Some("test-issuer"), Duration::minutes(5), &signer)
         .unwrap();
 
         println!("{jwt}");
